@@ -49,13 +49,27 @@ tmux kill-session -t "$SID"
 
 - **`-t` prefix-matches, so name-targeting kills the wrong session.** Targets resolve exact → fnmatch → *unambiguous prefix*. With sessions `prod` and `production-work` present, `kill-session -t production` destroys `production-work` — no wildcard typed, no warning, exit 0. Capture `#{session_id}` at creation and target `$N`. Where a name is unavoidable, anchor it: `has-session -t '=prod'` matches only `prod`. Never use `kill-session -a` (it kills everything *except* the target). This bites hardest because the documented cleanup advice for orphaned team sessions is name-based.
 
-- **`send-keys` executes on an embedded newline — there is no "type without running".** `send-keys -l` writes bytes to the pty and LF *is* Enter, so text containing `\n` runs even when no Enter key is sent. Anything you did not author this turn — file contents, pane output, fetched pages, another agent's text — goes in as a paste, never as keys:
+- **Any newline in text you send executes it, and no transport prevents that.** LF *is* Enter at the pty. Measured into a ready `bash` pane, every one of these ran the payload:
+
+  | mechanism | result |
+  |---|---|
+  | `send-keys -l` | EXECUTED |
+  | `paste-buffer` | EXECUTED |
+  | `paste-buffer -p` (bracketed) | EXECUTED |
+  | `paste-buffer -r` (no LF→CR) | EXECUTED |
+  | `paste-buffer -p -r` | EXECUTED |
+
+  `man tmux` explains it: on output, LF characters in the buffer are replaced with a separator, CR by default — and `-p` inserts bracket codes only *if the application has requested bracketed paste mode*, which you cannot detect (no format exposes it). `-r` avoids the LF→CR rewrite, but readline binds `accept-line` to both `\r` and `\n`, so it runs anyway.
+
+  **The control is the payload, not the transport.** Refuse to send text you did not author this turn if it contains `\r` or `\n`, unless submitting is explicitly what you meant:
+
   ```bash
-  tmux load-buffer -b tmp payload.txt
-  tmux paste-buffer -p -b tmp -t "$SID"   # -p = bracketed paste, lands in the input buffer
-  tmux delete-buffer -b tmp
+  case "$TEXT" in *[$'\r\n']*) echo "refusing multi-line send"; exit 1 ;; esac
   ```
-  Belt and braces: reject `\r`/`\n` in text unless the caller explicitly asked to submit, since bracketed paste only helps if the receiving program honours it — readline does, a raw-mode TUI may not.
+
+  `load-buffer` + `paste-buffer` remains useful for large or awkward payloads — it avoids `send-keys` interpreting a word like `Enter` or `C-c` as a keypress — but treat it as ergonomics, never as a safety boundary.
+
+- **Named paste buffers are server-global and leak.** `show-buffer -b <name>` returns the content from any session, `load-buffer -b <name>` silently overwrites a concurrent caller's payload, and `buffer-limit` only trims *automatic* buffers — named ones survive indefinitely. Use a unique name per call and `delete-buffer` in a `finally`; `paste-buffer -d` does not delete the buffer when the paste itself fails.
 
 - **Without `remain-on-exit on`, a finished pane disappears.** Default is `off`, so an exited pane is destroyed: `pane_dead` is never observable, the `pane-died`/`pane-exited` hooks never fire, and `capture-pane` on it errors. A crashed job leaves no trace it ever ran. Set it at creation or you cannot tell "finished" from "never started".
 
