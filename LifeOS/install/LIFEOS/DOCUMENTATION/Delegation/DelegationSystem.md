@@ -64,7 +64,10 @@ Agent({ prompt: "System design / distributed systems. Design the distributed cac
 Use the Agents skill to compose task-specific agents with unique traits, voices, and expertise:
 - Use a SINGLE message with MULTIPLE Agent tool calls
 - Each agent gets FULL CONTEXT and DETAILED INSTRUCTIONS via ComposeAgent prompt
-- Launch as many as needed (no artificial limit)
+- Launch as many as the work needs, but design around the runtime ceilings (Claude Code 2.1.219+):
+  - **Concurrency caps at 20 running subagents.** Excess spawns are denied, not queued — a fan-out wider than 20 silently loses the overflow unless `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` is raised in `settings.json`.
+  - **200 subagent spawns per session**, and **200 WebSearch calls per session** — `CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION` and `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION`. Long multi-fan-out sessions can reach these; a denied spawn late in a session usually means the session budget, not the concurrency cap.
+  - **Subagents nest to depth 3 by default.** A subagent may spawn its own subagents two levels further down. Set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` to flatten delegation back to a single tier. (This default has moved twice: 5 until 2.1.217, 1 in 2.1.217–2.1.218, 3 from 2.1.219 — check the installed version before relying on a specific depth.)
 - **ALWAYS launch a spotcheck agent after parallel work completes**
 
 **Agent routing by task type:**
